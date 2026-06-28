@@ -1,0 +1,331 @@
+# Pirsch Analytics Package for ESPHome
+# Fetches website analytics from Pirsch API and exposes as Home Assistant sensors
+
+# Global variables for storing Pirsch data
+globals:
+  - id: pirsch_token
+    type: std::string
+    restore_value: no
+  - id: pirsch_token_expiry
+    type: long
+    restore_value: no
+    initial_value: '0'
+  - id: pirsch_visitors
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: pirsch_views
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: pirsch_visitors_today
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: pirsch_views_today
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: pirsch_error_count
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: pirsch_last_success
+    type: long
+    restore_value: no
+    initial_value: '0'
+  - id: pirsch_auth_success
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+# Sensors exposed to Home Assistant
+sensor:
+  - platform: template
+    name: "Website Visitors"
+    id: website_visitors
+    lambda: 'return id(pirsch_visitors);'
+    update_interval: 30min
+    unit_of_measurement: "visitors"
+    icon: mdi:account-group
+    accuracy_decimals: 0
+
+  - platform: template
+    name: "Website Page Views"
+    id: website_views
+    lambda: 'return id(pirsch_views);'
+    update_interval: 30min
+    unit_of_measurement: "views"
+    icon: mdi:eye
+    accuracy_decimals: 0
+
+  - platform: template
+    name: "Website Visitors Today"
+    id: website_visitors_today
+    lambda: 'return id(pirsch_visitors_today);'
+    update_interval: 30min
+    unit_of_measurement: "visitors"
+    icon: mdi:account-group
+    accuracy_decimals: 0
+
+  - platform: template
+    name: "Website Page Views Today"
+    id: website_views_today
+    lambda: 'return id(pirsch_views_today);'
+    update_interval: 30min
+    unit_of_measurement: "views"
+    icon: mdi:eye
+    accuracy_decimals: 0
+
+  # Diagnostic sensors
+  - platform: template
+    name: "Pirsch Last Update"
+    id: pirsch_last_update
+    lambda: |-
+      if (id(pirsch_last_success) == 0) return NAN;
+      return (id(homeassistant_time).now().timestamp - id(pirsch_last_success)) / 60.0;
+    update_interval: 1min
+    unit_of_measurement: "min"
+    accuracy_decimals: 0
+    entity_category: diagnostic
+    icon: mdi:clock-outline
+
+text_sensor:
+  - platform: template
+    name: "Pirsch Auth Status"
+    id: pirsch_auth_status
+    lambda: |-
+      if (id(pirsch_token).empty()) return {"Not authenticated"};
+      if (id(pirsch_auth_success)) return {"Authenticated"};
+      return {"Authentication failed"};
+    update_interval: 1min
+    entity_category: diagnostic
+    icon: mdi:shield-check
+
+# Fetch Pirsch stats every 30 minutes
+interval:
+  - interval: 30min
+    then:
+      - script.execute: pirsch_fetch_stats
+
+# Scripts for Pirsch API interaction
+script:
+  # Step 1: Authenticate and get token
+  - id: pirsch_authenticate
+    then:
+      - lambda: 'id(pirsch_auth_success) = false;'
+      - http_request.post:
+          url: https://api.pirsch.io/api/v1/token
+          capture_response: true
+          max_response_buffer_size: 2048
+          request_headers:
+            Content-Type: application/json
+          json:
+            client_id: ${pirsch_client_id}
+            client_secret: ${pirsch_client_secret}
+          on_response:
+            then:
+              - if:
+                  condition:
+                    lambda: return response->status_code == 200;
+                  then:
+                    - lambda: |-
+                        ESP_LOGI("pirsch", "Auth response status: %d", response->status_code);
+                        ESP_LOGI("pirsch", "Auth response body length: %d", body.length());
+                        json::parse_json(body, [](JsonObject root) -> bool {
+                          if (root["access_token"]) {
+                              std::string token_from_json = root["access_token"].as<std::string>();
+                              id(pirsch_token) = token_from_json;
+
+                              // Parse expires_in (typically 3600 seconds = 1 hour)
+                              int expires_in = 3600; // Default 1 hour
+                              if (root["expires_in"]) {
+                                expires_in = root["expires_in"].as<int>();
+                              }
+
+                              auto now = id(homeassistant_time).now();
+                              id(pirsch_token_expiry) = now.timestamp + expires_in;
+                              id(pirsch_auth_success) = true;
+                              id(pirsch_error_count) = 0; // Reset error count on success
+
+                              ESP_LOGI("pirsch", "Authentication successful, token length: %d, expires in %d seconds",
+                                       id(pirsch_token).length(), expires_in);
+                              return true;
+                          }
+                          else {
+                            ESP_LOGI("pirsch","No 'access_token' key in this json!");
+                            id(pirsch_auth_success) = false;
+                            return false;
+                          }
+                        });
+                  else:
+                    - lambda: |-
+                        id(pirsch_auth_success) = false;
+                        id(pirsch_error_count)++;
+                        ESP_LOGE("pirsch", "Auth error: Response status: %d, message %s",
+                                 response->status_code, body.c_str());
+
+  # Step 2: Fetch statistics
+  - id: pirsch_get_stats
+    then:
+      - http_request.get:
+          url: !lambda |-
+            auto today = id(homeassistant_time).now();
+            char date_str[11];
+            snprintf(date_str, sizeof(date_str), "%04d-%02d-%02d",
+                     today.year, today.month, today.day_of_month);
+            std::string url = "https://api.pirsch.io/api/v1/statistics/total?id=${pirsch_domain_id}&from=2020-01-01&to=" + std::string(date_str);
+            ESP_LOGI("pirsch", "Fetching stats from Pirsch API for all-time");
+            return url.c_str();
+          capture_response: true
+          max_response_buffer_size: 1024
+          request_headers:
+            Content-Type: application/json
+            Authorization: !lambda |-
+              static std::string auth_header;
+              auth_header = "Bearer " + id(pirsch_token);
+              return auth_header.c_str();
+          on_response:
+            then:
+              - if:
+                  condition:
+                    lambda: return response->status_code == 200;
+                  then:
+                    - lambda: |-
+                        ESP_LOGI("pirsch", "Stats response status: %d", response->status_code);
+                        json::parse_json(body, [](JsonObject root) -> bool {
+                          if (root["visitors"] && root["views"]) {
+                            id(pirsch_visitors) = root["visitors"].as<int>();
+                            id(pirsch_views) = root["views"].as<int>();
+                            id(pirsch_last_success) = id(homeassistant_time).now().timestamp;
+                            id(pirsch_error_count) = 0; // Reset on success
+                            ESP_LOGI("pirsch", "Visitors: %d, Views: %d", id(pirsch_visitors), id(pirsch_views));
+                            return true;
+                          } else {
+                            ESP_LOGW("pirsch", "Missing visitors or views in response");
+                            id(pirsch_error_count)++;
+                            return false;
+                          }
+                        });
+                    - sensor.template.publish:
+                        id: website_visitors
+                        state: !lambda 'return id(pirsch_visitors);'
+                    - sensor.template.publish:
+                        id: website_views
+                        state: !lambda 'return id(pirsch_views);'
+                  else:
+                    - if:
+                        condition:
+                          lambda: return response->status_code == 401;
+                        then:
+                          - lambda: |-
+                              ESP_LOGW("pirsch", "Token expired (401), clearing token for re-authentication");
+                              id(pirsch_token) = "";
+                              id(pirsch_token_expiry) = 0;
+                              id(pirsch_auth_success) = false;
+                              id(pirsch_error_count)++;
+                        else:
+                          - lambda: |-
+                              id(pirsch_error_count)++;
+                              ESP_LOGE("pirsch", "Stats error: Response status: %d, message %s",
+                                       response->status_code, body.c_str());
+
+  # Step 3: Fetch today's statistics
+  - id: pirsch_get_stats_today
+    then:
+      - http_request.get:
+          url: !lambda |-
+            auto today = id(homeassistant_time).now();
+            char date_str[11];
+            snprintf(date_str, sizeof(date_str), "%04d-%02d-%02d",
+                     today.year, today.month, today.day_of_month);
+            std::string url = "https://api.pirsch.io/api/v1/statistics/total?id=${pirsch_domain_id}&from=" + std::string(date_str) + "&to=" + std::string(date_str);
+            ESP_LOGI("pirsch", "Fetching today's stats for date: %s", date_str);
+            return url.c_str();
+          capture_response: true
+          max_response_buffer_size: 1024
+          request_headers:
+            Content-Type: application/json
+            Authorization: !lambda |-
+              static std::string auth_header;
+              auth_header = "Bearer " + id(pirsch_token);
+              return auth_header.c_str();
+          on_response:
+            then:
+              - if:
+                  condition:
+                    lambda: return response->status_code == 200;
+                  then:
+                    - lambda: |-
+                        ESP_LOGI("pirsch", "Today's stats response status: %d", response->status_code);
+                        json::parse_json(body, [](JsonObject root) -> bool {
+                          if (root["visitors"] && root["views"]) {
+                            id(pirsch_visitors_today) = root["visitors"].as<int>();
+                            id(pirsch_views_today) = root["views"].as<int>();
+                            id(pirsch_last_success) = id(homeassistant_time).now().timestamp;
+                            ESP_LOGI("pirsch", "Visitors: %d, Views: %d", id(pirsch_visitors_today), id(pirsch_views_today));
+                            return true;
+                          } else {
+                            ESP_LOGW("pirsch", "Missing visitors or views in today's response");
+                            id(pirsch_error_count)++;
+                            return false;
+                          }
+                        });
+                    - sensor.template.publish:
+                        id: website_visitors_today
+                        state: !lambda 'return id(pirsch_visitors_today);'
+                    - sensor.template.publish:
+                        id: website_views_today
+                        state: !lambda 'return id(pirsch_views_today);'
+                  else:
+                    - if:
+                        condition:
+                          lambda: return response->status_code == 401;
+                        then:
+                          - lambda: |-
+                              ESP_LOGW("pirsch", "Token expired (401), clearing token for re-authentication");
+                              id(pirsch_token) = "";
+                              id(pirsch_token_expiry) = 0;
+                              id(pirsch_auth_success) = false;
+                              id(pirsch_error_count)++;
+                        else:
+                          - lambda: |-
+                              id(pirsch_error_count)++;
+                              ESP_LOGE("pirsch", "Today stats error: Response status: %d, message %s",
+                                       response->status_code, body.c_str());
+
+  # Main orchestrator script
+  - id: pirsch_fetch_stats
+    then:
+      - if:
+          condition:
+            lambda: 'return !id(homeassistant_time).now().is_valid();'
+          then:
+            - logger.log: "Time not synchronized yet, skipping stats fetch"
+            - script.stop: pirsch_fetch_stats
+      - lambda: 'ESP_LOGI("pirsch", "Starting Pirsch fetch stats");'
+      # Check if token is expired or about to expire (within 5 minutes)
+      - if:
+          condition:
+            lambda: |-
+              if (id(pirsch_token).empty()) return true;
+              auto now = id(homeassistant_time).now();
+              long time_until_expiry = id(pirsch_token_expiry) - now.timestamp;
+              // Re-authenticate if token expired or expires in less than 5 minutes
+              if (time_until_expiry < 300) {
+                ESP_LOGI("pirsch", "Token expired or expiring soon (%ld seconds remaining), re-authenticating", time_until_expiry);
+                return true;
+              }
+              return false;
+          then:
+            - lambda: 'ESP_LOGI("pirsch", "Token empty or expired, authenticating...");'
+            - script.execute: pirsch_authenticate
+            - script.wait: pirsch_authenticate
+            - if:
+                condition:
+                  lambda: 'return !id(pirsch_auth_success);'
+                then:
+                  - logger.log: "Authentication failed, aborting stats fetch"
+                  - script.stop: pirsch_fetch_stats
+      - script.execute: pirsch_get_stats
+      - script.execute: pirsch_get_stats_today

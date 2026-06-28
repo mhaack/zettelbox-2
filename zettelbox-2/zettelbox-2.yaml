@@ -1,0 +1,1152 @@
+substitutions:
+  pirsch_domain_id: !secret pirsch_domain_id
+  pirsch_client_id: !secret pirsch_client_id
+  pirsch_client_secret: !secret pirsch_client_secret
+
+packages:
+  pirsch: !include pirsch-analytics.yaml
+
+esphome:
+  name: zettelbox-2
+  build_path: ../dist
+  on_boot:
+    priority: -100
+    then:
+      - delay: 10s
+      - wait_until:
+          condition:
+            lambda: 'return id(homeassistant_time).now().is_valid();'
+      - script.execute: pirsch_fetch_stats
+      - script.wait: pirsch_fetch_stats
+      - script.wait: pirsch_get_stats
+      - script.wait: pirsch_get_stats_today
+      - lambda: |-
+          auto t = id(homeassistant_time).now();
+          if (t.is_valid()) {
+            char buf[6];
+            t.strftime(buf, sizeof(buf), "%H:%M");
+            id(last_update_str) = std::string(buf);
+          }
+      - script.execute: update_display
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+logger:
+
+debug:
+  update_interval: 60s
+
+mdns:
+  disabled: true
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: !secret ap_ssid
+    password: !secret ap_password
+
+captive_portal:
+
+http_request:
+  timeout: 10s
+  buffer_size_rx: 4096
+  buffer_size_tx: 4096
+
+spi:
+  clk_pin: GPIO13
+  mosi_pin: GPIO14
+
+time:
+  - platform: homeassistant
+    id: homeassistant_time
+    on_time:
+      - seconds: /30
+        then:
+          - display.page.show_next: epaper_display
+          - component.update: epaper_display
+
+sensor:
+  - platform: wifi_signal
+    id: wifi_rssi
+    update_interval: 60s
+
+  - platform: homeassistant
+    entity_id: sensor.garden_temperature
+    id: garden_temp
+
+  - platform: homeassistant
+    entity_id: sensor.livingroom_temperature
+    id: indoor_temp
+
+  - platform: homeassistant
+    entity_id: sensor.solaredge_imported_energy
+    id: imported_energy
+
+  - platform: homeassistant
+    entity_id: sensor.solaredge_exported_energy
+    id: exported_energy
+
+  - platform: homeassistant
+    entity_id: sensor.solaredge_consumption_energy
+    id: consumption_energy
+
+  - platform: homeassistant
+    entity_id: sensor.solaredge_storage_level
+    id: storage_level
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+
+  - platform: homeassistant
+    entity_id: sensor.solaredge_energy_today
+    id: energy_today
+
+  - platform: homeassistant
+    entity_id: sensor.pool_solar_temperature
+    id: pool_solar_temperature
+
+  - platform: homeassistant
+    entity_id: sensor.pool_water_temperature_2
+    id: pool_water_temperature
+
+  - platform: homeassistant
+    entity_id: sensor.polestar_4_current_odometer
+    id: car_odometer
+
+  - platform: homeassistant
+    entity_id: sensor.polestar_4_battery_charge_level
+    id: car_charge_level
+    unit_of_measurement: "%"
+
+  - platform: homeassistant
+    entity_id: sensor.polestar_4_estimated_range
+    id: car_range
+
+  - platform: homeassistant
+    entity_id: sensor.polestar_4_charging_power
+    id: car_charging_power
+
+  - platform: homeassistant
+    entity_id: sensor.claude_usage_session_usage
+    id: claude_session_usage
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+
+  - platform: homeassistant
+    entity_id: sensor.claude_usage_week_usage
+    id: claude_week_usage
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+
+  - platform: homeassistant
+    entity_id: sensor.livingroom_humidity
+    id: indoor_humidity
+    accuracy_decimals: 0
+
+  - platform: homeassistant
+    entity_id: sensor.garden_feinstaub_pm2_5
+    id: garden_pm25
+
+  - platform: uptime
+    id: uptime_s
+    type: seconds
+
+  - platform: homeassistant
+    entity_id: weather.jama_villa
+    id: weather_temp
+    attribute: temperature
+    accuracy_decimals: 1
+
+  - platform: homeassistant
+    entity_id: weather.jama_villa
+    id: weather_wind_speed
+    attribute: wind_speed
+    accuracy_decimals: 1
+
+  - platform: homeassistant
+    entity_id: weather.jama_villa
+    id: weather_wind_bearing
+    attribute: wind_bearing
+    accuracy_decimals: 0
+
+binary_sensor:
+  - platform: homeassistant
+    entity_id: binary_sensor.pool_pump_state
+    id: pool_pump_state
+
+  - platform: homeassistant
+    entity_id: binary_sensor.pool_valve_state
+    id: pool_valve_state
+
+text_sensor:
+  - platform: homeassistant
+    entity_id: sensor.waste_collection
+    id: waste_next
+
+  - platform: homeassistant
+    entity_id: sensor.polestar_4_charging_status
+    id: car_charging_status
+
+  - platform: homeassistant
+    entity_id: sensor.claude_usage_session_reset_time
+    id: claude_session_reset_time
+
+  - platform: homeassistant
+    entity_id: sensor.claude_usage_weekly_reset_time
+    id: claude_weekly_reset_time
+
+  - platform: wifi_info
+    ip_address:
+      id: wifi_ip
+
+  - platform: homeassistant
+    entity_id: weather.jama_villa
+    id: weather_condition
+
+globals:
+  - id: last_update_str
+    type: std::string
+    restore_value: false
+    initial_value: '"--:--"'
+
+script:
+  - id: update_display
+    then:
+      - component.update: epaper_display
+
+interval:
+  - interval: 30min
+    then:
+      - script.execute: pirsch_fetch_stats
+      - script.wait: pirsch_fetch_stats
+      - script.wait: pirsch_get_stats
+      - script.wait: pirsch_get_stats_today
+      - lambda: |-
+          auto t = id(homeassistant_time).now();
+          if (t.is_valid()) {
+            char buf[6];
+            t.strftime(buf, sizeof(buf), "%H:%M");
+            id(last_update_str) = std::string(buf);
+          }
+      - script.execute: update_display
+
+image:
+  - file: mdi:wifi-off
+    id: img_wifi_0
+    resize: 24x24
+    type: BINARY
+  - file: mdi:wifi-strength-1
+    id: img_wifi_1
+    resize: 24x24
+    type: BINARY
+  - file: mdi:wifi-strength-2
+    id: img_wifi_2
+    resize: 24x24
+    type: BINARY
+  - file: mdi:wifi-strength-4
+    id: img_wifi_4
+    resize: 24x24
+    type: BINARY
+  - file: mdi:flash
+    id: img_flash
+    resize: 16x16
+    type: BINARY
+  - file: mdi:pool
+    id: img_pool
+    resize: 16x16
+    type: BINARY
+  - file: mdi:thermometer
+    id: img_thermometer
+    resize: 16x16
+    type: BINARY
+  - file: mdi:car
+    id: img_car
+    resize: 16x16
+    type: BINARY
+  - file: mdi:trash-can
+    id: img_trash
+    resize: 16x16
+    type: BINARY
+  - file: mdi:web
+    id: img_web
+    resize: 16x16
+    type: BINARY
+  - file: mdi:robot
+    id: img_robot
+    resize: 16x16
+    type: BINARY
+  - file: mdi:cog-outline
+    id: img_cog
+    resize: 16x16
+    type: BINARY
+  # Card icons — 18x18
+  - file: mdi:thermometer
+    id: img_card_thermometer
+    resize: 22x22
+    type: BINARY
+  - file: mdi:home-thermometer-outline
+    id: img_home_thermometer_outline
+    resize: 22x22
+    type: BINARY
+  - file: mdi:map-marker-distance
+    id: img_map_marker_distance
+    resize: 18x18
+    type: BINARY
+  - file: mdi:ev-station
+    id: img_ev_station
+    resize: 18x18
+    type: BINARY
+  - file: mdi:lightning-bolt
+    id: img_lightning_bolt
+    resize: 18x18
+    type: BINARY
+  - file: mdi:account
+    id: img_account
+    resize: 18x18
+    type: BINARY
+  - file: mdi:account-eye
+    id: img_account_eye
+    resize: 18x18
+    type: BINARY
+  - file: mdi:ip-outline
+    id: img_ip_outline
+    resize: 18x18
+    type: BINARY
+  - file: mdi:weather-sunny
+    id: img_sunny
+    resize: 18x18
+    type: BINARY
+  - file: mdi:home-lightning-bolt-outline
+    id: img_home_lightning
+    resize: 18x18
+    type: BINARY
+  - file: mdi:transmission-tower-export
+    id: img_tower_export
+    resize: 18x18
+    type: BINARY
+  - file: mdi:transmission-tower-import
+    id: img_tower_import
+    resize: 18x18
+    type: BINARY
+  - file: mdi:pump
+    id: img_pump
+    resize: 18x18
+    type: BINARY
+  - file: mdi:sun-wireless-outline
+    id: img_sun_wireless
+    resize: 18x18
+    type: BINARY
+  - file: mdi:coolant-temperature
+    id: img_coolant
+    resize: 18x18
+    type: BINARY
+  - file: mdi:battery-low
+    id: img_batt_low
+    resize: 18x18
+    type: BINARY
+  - file: mdi:battery-medium
+    id: img_batt_med
+    resize: 18x18
+    type: BINARY
+  - file: mdi:battery-high
+    id: img_batt_high
+    resize: 18x18
+    type: BINARY
+  - file: mdi:battery-charging-low
+    id: img_batt_chg_low
+    resize: 18x18
+    type: BINARY
+  - file: mdi:battery-charging-medium
+    id: img_batt_chg_med
+    resize: 18x18
+    type: BINARY
+  - file: mdi:battery-charging-high
+    id: img_batt_chg_high
+    resize: 18x18
+    type: BINARY
+  - file: mdi:timer-sand
+    id: img_timer_sand
+    resize: 18x18
+    type: BINARY
+  - file: mdi:calendar-week
+    id: img_calendar_week
+    resize: 18x18
+    type: BINARY
+  - file: mdi:timer-refresh
+    id: img_timer_refresh
+    resize: 18x18
+    type: BINARY
+  - file: mdi:water-percent
+    id: img_humidity
+    resize: 22x22
+    type: BINARY
+  - file: mdi:air-filter
+    id: img_air_filter
+    resize: 22x22
+    type: BINARY
+  - file: mdi:car-electric-outline
+    id: img_car_electric
+    resize: 18x18
+    type: BINARY
+  - file: mdi:transmission-tower
+    id: img_tower
+    resize: 18x18
+    type: BINARY
+  - file: mdi:trash-can
+    id: img_trash_24
+    resize: 24x24
+    type: BINARY
+  - file: mdi:history
+    id: img_history
+    resize: 18x18
+    type: BINARY
+  - file: mdi:clock-outline
+    id: img_clock
+    resize: 18x18
+    type: BINARY
+  - file: mdi:calendar-today
+    id: img_calendar_today
+    resize: 18x18
+    type: BINARY
+  # Weather status bar icon
+  - file: mdi:weather-partly-cloudy
+    id: img_weather_status
+    resize: 16x16
+    type: BINARY
+  # Weather condition icons — 64x64
+  - file: mdi:weather-sunny
+    id: img_weather_sunny
+    resize: 64x64
+    type: BINARY
+  - file: mdi:weather-night
+    id: img_weather_night
+    resize: 64x64
+    type: BINARY
+  - file: mdi:weather-partly-cloudy
+    id: img_weather_partlycloudy
+    resize: 64x64
+    type: BINARY
+  - file: mdi:weather-cloudy
+    id: img_weather_cloudy
+    resize: 64x64
+    type: BINARY
+  - file: mdi:weather-rainy
+    id: img_weather_rainy
+    resize: 64x64
+    type: BINARY
+  - file: mdi:weather-pouring
+    id: img_weather_pouring
+    resize: 64x64
+    type: BINARY
+  - file: mdi:weather-snowy
+    id: img_weather_snowy
+    resize: 64x64
+    type: BINARY
+  - file: mdi:weather-snowy-rainy
+    id: img_weather_snowy_rainy
+    resize: 64x64
+    type: BINARY
+  - file: mdi:weather-fog
+    id: img_weather_fog
+    resize: 64x64
+    type: BINARY
+  - file: mdi:weather-hail
+    id: img_weather_hail
+    resize: 64x64
+    type: BINARY
+  - file: mdi:weather-lightning
+    id: img_weather_lightning
+    resize: 64x64
+    type: BINARY
+  - file: mdi:weather-lightning-rainy
+    id: img_weather_lightning_rainy
+    resize: 64x64
+    type: BINARY
+  - file: mdi:weather-windy
+    id: img_weather_windy
+    resize: 64x64
+    type: BINARY
+  - file: mdi:weather-windy-variant
+    id: img_weather_windy_variant
+    resize: 64x64
+    type: BINARY
+  - file: mdi:alert-circle-outline
+    id: img_weather_exceptional
+    resize: 64x64
+    type: BINARY
+
+font:
+  - file: "gfonts://Roboto"
+    id: font_12
+    size: 12
+    glyphs: " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~°äöüÄÖÜß"
+  - file: "gfonts://Roboto"
+    id: font_14
+    size: 14
+    glyphs: " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~°äöüÄÖÜß"
+  - file: "gfonts://Roboto"
+    id: font_20
+    size: 20
+    glyphs: " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~°äöüÄÖÜß"
+
+display:
+  - platform: waveshare_epaper
+    id: epaper_display
+    cs_pin: GPIO15
+    dc_pin: GPIO27
+    busy_pin: GPIO25
+    reset_pin: GPIO26
+    model: 2.70in
+    rotation: 90
+    update_interval: never
+    pages:
+      - id: page_weather
+        lambda: |-
+          int W = it.get_width();
+          int H = it.get_height();
+          int PAD = 6;
+          int STATUS_H = 20;
+
+          auto draw_status_bar = [&](const char* title, int page_num) {
+            it.print(PAD + 20, STATUS_H / 2, id(font_12), TextAlign::CENTER_LEFT, title);
+            auto now = id(homeassistant_time).now();
+            if (now.is_valid())
+              it.strftime(W - PAD - 20, STATUS_H / 2, id(font_12), TextAlign::CENTER_RIGHT, "%H:%M", now);
+            int cx = W - PAD - 8, cy = STATUS_H / 2;
+            it.circle(cx, cy, 8);
+            char pg_str[2];
+            snprintf(pg_str, sizeof(pg_str), "%d", page_num);
+            it.print(cx, cy, id(font_12), TextAlign::CENTER, pg_str);
+            it.line(0, STATUS_H, W, STATUS_H);
+          };
+
+          draw_status_bar("Wetter", 1);
+          it.image(PAD, 2, id(img_weather_status));
+
+          // Map condition string to icon
+          auto* cond_img = id(img_weather_cloudy);
+          if (id(weather_condition).has_state()) {
+            const std::string& c = id(weather_condition).state;
+            if (c == "sunny")               cond_img = id(img_weather_sunny);
+            else if (c == "clear-night")    cond_img = id(img_weather_night);
+            else if (c == "partlycloudy")   cond_img = id(img_weather_partlycloudy);
+            else if (c == "cloudy")         cond_img = id(img_weather_cloudy);
+            else if (c == "rainy")          cond_img = id(img_weather_rainy);
+            else if (c == "pouring")        cond_img = id(img_weather_pouring);
+            else if (c == "snowy")          cond_img = id(img_weather_snowy);
+            else if (c == "snowy-rainy")    cond_img = id(img_weather_snowy_rainy);
+            else if (c == "fog")            cond_img = id(img_weather_fog);
+            else if (c == "hail")           cond_img = id(img_weather_hail);
+            else if (c == "lightning")      cond_img = id(img_weather_lightning);
+            else if (c == "lightning-rainy") cond_img = id(img_weather_lightning_rainy);
+            else if (c == "windy")          cond_img = id(img_weather_windy);
+            else if (c == "windy-variant")  cond_img = id(img_weather_windy_variant);
+            else if (c == "exceptional")    cond_img = id(img_weather_exceptional);
+          }
+          it.image(W / 2 - 32, 44, cond_img);
+
+          // Temperature
+          char buf[12];
+          if (id(weather_temp).has_state()) snprintf(buf, sizeof(buf), "%.1f", id(weather_temp).state);
+          else snprintf(buf, sizeof(buf), "--");
+          it.print(W / 2, 133, id(font_20), TextAlign::BASELINE_RIGHT, buf);
+          it.print(W / 2 + 3, 133, id(font_12), TextAlign::BASELINE_LEFT, "°C");
+
+          // Wind direction + speed
+          char wind_buf[20];
+          if (id(weather_wind_speed).has_state() && id(weather_wind_bearing).has_state()) {
+            float b = id(weather_wind_bearing).state;
+            const char* dir = "N";
+            if      (b >=  22.5 && b <  67.5) dir = "NO";
+            else if (b >=  67.5 && b < 112.5) dir = "O";
+            else if (b >= 112.5 && b < 157.5) dir = "SO";
+            else if (b >= 157.5 && b < 202.5) dir = "S";
+            else if (b >= 202.5 && b < 247.5) dir = "SW";
+            else if (b >= 247.5 && b < 292.5) dir = "W";
+            else if (b >= 292.5 && b < 337.5) dir = "NW";
+            snprintf(wind_buf, sizeof(wind_buf), "Wind %.1f km/h (%s)", id(weather_wind_speed).state, dir);
+          } else {
+            snprintf(wind_buf, sizeof(wind_buf), "--");
+          }
+          it.print(W / 2, 153, id(font_14), TextAlign::BASELINE_CENTER, wind_buf);
+
+      - id: page1
+        lambda: |-
+          int W = it.get_width();
+          int H = it.get_height();
+          int PAD = 6;
+          int STATUS_H = 20;
+          int CARD_H = (H - STATUS_H - 3 * PAD) / 2;
+          int CARD_W = (W - 4 * PAD) / 3;
+
+          auto draw_status_bar = [&](const char* title, int page_num) {
+            it.print(PAD + 20, STATUS_H / 2, id(font_12), TextAlign::CENTER_LEFT, title);
+            auto now = id(homeassistant_time).now();
+            if (now.is_valid())
+              it.strftime(W - PAD - 20, STATUS_H / 2, id(font_12), TextAlign::CENTER_RIGHT, "%H:%M", now);
+            int cx = W - PAD - 8, cy = STATUS_H / 2;
+            it.circle(cx, cy, 8);
+            char pg_str[2];
+            snprintf(pg_str, sizeof(pg_str), "%d", page_num);
+            it.print(cx, cy, id(font_12), TextAlign::CENTER, pg_str);
+            it.line(0, STATUS_H, W, STATUS_H);
+          };
+
+          auto draw_card = [&](int x, int y, const char* label, const char* value, const char* unit, int x_offset = 0) {
+            int mid = x + CARD_W / 2 + x_offset;
+            int val_base = y + CARD_H - 20;
+            it.rectangle(x, y, CARD_W, CARD_H);
+            it.print(x + PAD, y + PAD + 10, id(font_12), TextAlign::BASELINE_LEFT, label);
+            if (unit[0] != '\0') {
+              it.print(mid, val_base, id(font_20), TextAlign::BASELINE_RIGHT, value);
+              it.print(mid + 3, val_base, id(font_12), TextAlign::BASELINE_LEFT, unit);
+            } else {
+              it.print(mid, val_base, id(font_20), TextAlign::BASELINE_CENTER, value);
+            }
+          };
+
+          int COL1 = PAD;
+          int COL2 = PAD + CARD_W + PAD;
+          int COL3 = COL2 + CARD_W + PAD;
+          int ROW1 = STATUS_H + PAD;
+          int ROW2 = ROW1 + CARD_H + PAD;
+
+          draw_status_bar("Energie", 2);
+          it.image(PAD, 2, id(img_flash));
+
+          char buf[12];
+
+          if (id(energy_today).has_state()) snprintf(buf, sizeof(buf), "%.1f", id(energy_today).state);
+          else snprintf(buf, sizeof(buf), "--");
+          draw_card(COL1, ROW1, "Solar", buf, "kWh", 4);
+          it.image(COL1 + CARD_W - PAD - 18, ROW1 + PAD, id(img_sunny));
+
+          if (id(storage_level).has_state()) snprintf(buf, sizeof(buf), "%.0f", id(storage_level).state);
+          else snprintf(buf, sizeof(buf), "--");
+          draw_card(COL2, ROW1, "Batterie", buf, "%", 4);
+          {
+            float lvl = id(storage_level).state;
+            auto batt_img = (!id(storage_level).has_state() || lvl < 30) ? id(img_batt_low)
+                            : (lvl < 70) ? id(img_batt_med)
+                            : id(img_batt_high);
+            it.image(COL2 + CARD_W - PAD - 18, ROW1 + PAD, batt_img);
+          }
+
+          if (id(consumption_energy).has_state()) snprintf(buf, sizeof(buf), "%.1f", id(consumption_energy).state);
+          else snprintf(buf, sizeof(buf), "--");
+          draw_card(COL3, ROW1, "Verbrauch", buf, "kWh", 4);
+
+          if (id(exported_energy).has_state()) snprintf(buf, sizeof(buf), "%.1f", id(exported_energy).state);
+          else snprintf(buf, sizeof(buf), "--");
+          draw_card(COL1, ROW2, "Export", buf, "kWh", 4);
+          it.image(COL1 + CARD_W - PAD - 18, ROW2 + PAD, id(img_tower_export));
+
+          if (id(imported_energy).has_state()) snprintf(buf, sizeof(buf), "%.1f", id(imported_energy).state);
+          else snprintf(buf, sizeof(buf), "--");
+          draw_card(COL2, ROW2, "Import", buf, "kWh", 4);
+          it.image(COL2 + CARD_W - PAD - 18, ROW2 + PAD, id(img_tower_import));
+
+          if (id(exported_energy).has_state() && id(imported_energy).has_state())
+            snprintf(buf, sizeof(buf), "%.1f", id(exported_energy).state - id(imported_energy).state);
+          else snprintf(buf, sizeof(buf), "--");
+          draw_card(COL3, ROW2, "Netz", buf, "kWh", 4);
+          it.image(COL3 + CARD_W - PAD - 18, ROW2 + PAD, id(img_tower));
+
+      - id: page2
+        lambda: |-
+          int W = it.get_width();
+          int H = it.get_height();
+          int PAD = 6;
+          int STATUS_H = 20;
+          int CARD_H = (H - STATUS_H - 3 * PAD) / 2;
+          int CARD_W = (W - 3 * PAD) / 2;
+
+          auto draw_status_bar = [&](const char* title, int page_num) {
+            it.print(PAD + 20, STATUS_H / 2, id(font_12), TextAlign::CENTER_LEFT, title);
+            auto now = id(homeassistant_time).now();
+            if (now.is_valid())
+              it.strftime(W - PAD - 20, STATUS_H / 2, id(font_12), TextAlign::CENTER_RIGHT, "%H:%M", now);
+            int cx = W - PAD - 8, cy = STATUS_H / 2;
+            it.circle(cx, cy, 8);
+            char pg_str[2];
+            snprintf(pg_str, sizeof(pg_str), "%d", page_num);
+            it.print(cx, cy, id(font_12), TextAlign::CENTER, pg_str);
+            it.line(0, STATUS_H, W, STATUS_H);
+          };
+
+          auto draw_card = [&](int x, int y, const char* label, const char* value, const char* unit, int x_offset = 0) {
+            int mid = x + CARD_W / 2 + x_offset;
+            int val_base = y + CARD_H - 20;
+            it.rectangle(x, y, CARD_W, CARD_H);
+            it.print(x + PAD, y + PAD + 10, id(font_14), TextAlign::BASELINE_LEFT, label);
+            if (unit[0] != '\0') {
+              it.print(mid, val_base, id(font_20), TextAlign::BASELINE_RIGHT, value);
+              it.print(mid + 3, val_base, id(font_12), TextAlign::BASELINE_LEFT, unit);
+            } else {
+              it.print(mid, val_base, id(font_20), TextAlign::BASELINE_CENTER, value);
+            }
+          };
+
+          int COL1 = PAD;
+          int COL2 = PAD + CARD_W + PAD;
+          int ROW1 = STATUS_H + PAD;
+          int ROW2 = ROW1 + CARD_H + PAD;
+
+          draw_status_bar("Pool", 3);
+          it.image(PAD, 2, id(img_pool));
+
+          draw_card(COL1, ROW1, "Pumpe",
+            id(pool_pump_state).has_state() ? (id(pool_pump_state).state ? "An" : "Aus") : "--", "");
+          it.image(COL1 + CARD_W - PAD - 18, ROW1 + PAD, id(img_pump));
+          draw_card(COL2, ROW1, "Solar",
+            id(pool_valve_state).has_state() ? (id(pool_valve_state).state ? "An" : "Aus") : "--", "");
+          it.image(COL2 + CARD_W - PAD - 18, ROW1 + PAD, id(img_sun_wireless));
+
+          char buf[12];
+          if (id(pool_water_temperature).has_state()) snprintf(buf, sizeof(buf), "%.1f", id(pool_water_temperature).state);
+          else snprintf(buf, sizeof(buf), "--");
+          draw_card(COL1, ROW2, "Wasser", buf, "°C", 9);
+          it.image(COL1 + CARD_W - PAD - 18, ROW2 + PAD, id(img_coolant));
+
+          if (id(pool_solar_temperature).has_state()) snprintf(buf, sizeof(buf), "%.1f", id(pool_solar_temperature).state);
+          else snprintf(buf, sizeof(buf), "--");
+          draw_card(COL2, ROW2, "Heizung", buf, "°C", 9);
+          it.image(COL2 + CARD_W - PAD - 18, ROW2 + PAD, id(img_sunny));
+
+      - id: page3
+        lambda: |-
+          int W = it.get_width();
+          int H = it.get_height();
+          int PAD = 6;
+          int STATUS_H = 20;
+          int CARD_H = (H - STATUS_H - 3 * PAD) / 2;
+          int CARD_W = (W - 3 * PAD) / 2;
+
+          auto draw_status_bar = [&](const char* title, int page_num) {
+            it.print(PAD + 20, STATUS_H / 2, id(font_12), TextAlign::CENTER_LEFT, title);
+            auto now = id(homeassistant_time).now();
+            if (now.is_valid())
+              it.strftime(W - PAD - 20, STATUS_H / 2, id(font_12), TextAlign::CENTER_RIGHT, "%H:%M", now);
+            int cx = W - PAD - 8, cy = STATUS_H / 2;
+            it.circle(cx, cy, 8);
+            char pg_str[2];
+            snprintf(pg_str, sizeof(pg_str), "%d", page_num);
+            it.print(cx, cy, id(font_12), TextAlign::CENTER, pg_str);
+            it.line(0, STATUS_H, W, STATUS_H);
+          };
+
+          auto draw_card = [&](int x, int y, const char* label, const char* value, const char* unit, int x_offset = 0) {
+            int mid = x + CARD_W / 2 + x_offset;
+            int val_base = y + CARD_H - 20;
+            it.rectangle(x, y, CARD_W, CARD_H);
+            it.print(x + PAD, y + PAD + 10, id(font_14), TextAlign::BASELINE_LEFT, label);
+            if (unit[0] != '\0') {
+              it.print(mid, val_base, id(font_20), TextAlign::BASELINE_RIGHT, value);
+              it.print(mid + 3, val_base, id(font_12), TextAlign::BASELINE_LEFT, unit);
+            } else {
+              it.print(mid, val_base, id(font_20), TextAlign::BASELINE_CENTER, value);
+            }
+          };
+
+          int COL1 = PAD;
+          int COL2 = PAD + CARD_W + PAD;
+          int ROW1 = STATUS_H + PAD;
+          int ROW2 = ROW1 + CARD_H + PAD;
+
+          draw_status_bar("Klima", 4);
+          it.image(PAD, 2, id(img_thermometer));
+
+          char buf[12];
+
+          if (id(garden_temp).has_state()) snprintf(buf, sizeof(buf), "%.1f", id(garden_temp).state);
+          else snprintf(buf, sizeof(buf), "--");
+          draw_card(COL1, ROW1, "Garten", buf, "°C", 9);
+          it.image(COL1 + CARD_W - PAD - 22, ROW1 + PAD, id(img_card_thermometer));
+
+          if (id(indoor_temp).has_state()) snprintf(buf, sizeof(buf), "%.1f", id(indoor_temp).state);
+          else snprintf(buf, sizeof(buf), "--");
+          draw_card(COL2, ROW1, "Innen", buf, "°C", 9);
+          it.image(COL2 + CARD_W - PAD - 22, ROW1 + PAD, id(img_home_thermometer_outline));
+
+          // Feuchtigkeit — draw_card, 22px icon
+          if (id(indoor_humidity).has_state()) snprintf(buf, sizeof(buf), "%.0f", id(indoor_humidity).state);
+          else snprintf(buf, sizeof(buf), "--");
+          draw_card(COL1, ROW2, "Feuchtigkeit", buf, "%");
+          it.image(COL1 + CARD_W - PAD - 22, ROW2 + PAD, id(img_humidity));
+
+          // Feinstaub — draw_card, 22px icon
+          if (id(garden_pm25).has_state()) snprintf(buf, sizeof(buf), "%.0f", id(garden_pm25).state);
+          else snprintf(buf, sizeof(buf), "--");
+          draw_card(COL2, ROW2, "Feinstaub", buf, "");
+          it.image(COL2 + CARD_W - PAD - 22, ROW2 + PAD, id(img_air_filter));
+
+      - id: page4
+        lambda: |-
+          int W = it.get_width();
+          int H = it.get_height();
+          int PAD = 6;
+          int STATUS_H = 20;
+          int CARD_H = (H - STATUS_H - 3 * PAD) / 2;
+          int CARD_W = (W - 3 * PAD) / 2;
+
+          auto draw_status_bar = [&](const char* title, int page_num) {
+            it.print(PAD + 20, STATUS_H / 2, id(font_12), TextAlign::CENTER_LEFT, title);
+            auto now = id(homeassistant_time).now();
+            if (now.is_valid())
+              it.strftime(W - PAD - 20, STATUS_H / 2, id(font_12), TextAlign::CENTER_RIGHT, "%H:%M", now);
+            int cx = W - PAD - 8, cy = STATUS_H / 2;
+            it.circle(cx, cy, 8);
+            char pg_str[2];
+            snprintf(pg_str, sizeof(pg_str), "%d", page_num);
+            it.print(cx, cy, id(font_12), TextAlign::CENTER, pg_str);
+            it.line(0, STATUS_H, W, STATUS_H);
+          };
+
+          auto draw_card = [&](int x, int y, const char* label, const char* value, const char* unit, int x_offset = 0) {
+            int mid = x + CARD_W / 2 + x_offset;
+            int val_base = y + CARD_H - 20;
+            it.rectangle(x, y, CARD_W, CARD_H);
+            it.print(x + PAD, y + PAD + 10, id(font_14), TextAlign::BASELINE_LEFT, label);
+            if (unit[0] != '\0') {
+              it.print(mid, val_base, id(font_20), TextAlign::BASELINE_RIGHT, value);
+              it.print(mid + 3, val_base, id(font_12), TextAlign::BASELINE_LEFT, unit);
+            } else {
+              it.print(mid, val_base, id(font_20), TextAlign::BASELINE_CENTER, value);
+            }
+          };
+
+          int COL1 = PAD;
+          int COL2 = PAD + CARD_W + PAD;
+          int ROW1 = STATUS_H + PAD;
+          int ROW2 = ROW1 + CARD_H + PAD;
+
+          draw_status_bar("Auto", 5);
+          it.image(PAD, 2, id(img_car));
+
+          char buf[16];
+
+          if (id(car_odometer).has_state()) snprintf(buf, sizeof(buf), "%.0f km", id(car_odometer).state);
+          else snprintf(buf, sizeof(buf), "--");
+          draw_card(COL1, ROW1, "Kilometer", buf, "");
+          it.image(COL1 + CARD_W - PAD - 18, ROW1 + PAD, id(img_map_marker_distance));
+
+          // Akku — dynamic battery icon
+          if (id(car_charge_level).has_state()) snprintf(buf, sizeof(buf), "%.0f", id(car_charge_level).state);
+          else snprintf(buf, sizeof(buf), "--");
+          draw_card(COL2, ROW1, "Akkustand", buf, "%");
+          {
+            float lvl = id(car_charge_level).state;
+            bool charging = id(car_charging_status).has_state() && id(car_charging_status).state == "Charging";
+            auto batt_img = charging
+              ? ((!id(car_charge_level).has_state() || lvl < 30) ? id(img_batt_chg_low) : (lvl < 70) ? id(img_batt_chg_med) : id(img_batt_chg_high))
+              : ((!id(car_charge_level).has_state() || lvl < 30) ? id(img_batt_low) : (lvl < 70) ? id(img_batt_med) : id(img_batt_high));
+            it.image(COL2 + CARD_W - PAD - 18, ROW1 + PAD, batt_img);
+          }
+
+          if (id(car_range).has_state()) snprintf(buf, sizeof(buf), "%.0f km", id(car_range).state);
+          else snprintf(buf, sizeof(buf), "--");
+          draw_card(COL1, ROW2, "Reichweite", buf, "");
+          it.image(COL1 + CARD_W - PAD - 18, ROW2 + PAD, id(img_map_marker_distance));
+
+          // Laden — kW when charging, status text when not
+          it.rectangle(COL2, ROW2, CARD_W, CARD_H);
+          it.print(COL2 + PAD, ROW2 + PAD + 10, id(font_14), TextAlign::BASELINE_LEFT, "Laden");
+          it.image(COL2 + CARD_W - PAD - 18, ROW2 + PAD, id(img_car_electric));
+          {
+            bool is_charging = id(car_charging_status).has_state() && id(car_charging_status).state == "Charging";
+            int val_base = ROW2 + CARD_H - 20;
+            if (is_charging) {
+              if (id(car_charging_power).has_state()) snprintf(buf, sizeof(buf), "%.1f", id(car_charging_power).state);
+              else snprintf(buf, sizeof(buf), "--");
+              int mid = COL2 + CARD_W / 2;
+              it.print(mid, val_base, id(font_20), TextAlign::BASELINE_RIGHT, buf);
+              it.print(mid + 3, val_base, id(font_12), TextAlign::BASELINE_LEFT, "kW");
+            } else {
+              const char* s = id(car_charging_status).has_state() ? id(car_charging_status).state.c_str() : "--";
+              it.print(COL2 + CARD_W / 2, val_base, id(font_14), TextAlign::BASELINE_CENTER, s);
+            }
+          }
+
+      - id: page5
+        lambda: |-
+          int W = it.get_width();
+          int H = it.get_height();
+          int PAD = 6;
+          int STATUS_H = 20;
+
+          auto draw_status_bar = [&](const char* title, int page_num) {
+            it.print(PAD + 20, STATUS_H / 2, id(font_12), TextAlign::CENTER_LEFT, title);
+            auto now = id(homeassistant_time).now();
+            if (now.is_valid())
+              it.strftime(W - PAD - 20, STATUS_H / 2, id(font_12), TextAlign::CENTER_RIGHT, "%H:%M", now);
+            int cx = W - PAD - 8, cy = STATUS_H / 2;
+            it.circle(cx, cy, 8);
+            char pg_str[2];
+            snprintf(pg_str, sizeof(pg_str), "%d", page_num);
+            it.print(cx, cy, id(font_12), TextAlign::CENTER, pg_str);
+            it.line(0, STATUS_H, W, STATUS_H);
+          };
+
+          draw_status_bar("Abfall", 6);
+          it.image(PAD, 2, id(img_trash));
+
+          int content_mid_y = STATUS_H + (H - STATUS_H) / 2;
+          it.image(W / 2 - 12, content_mid_y - 49, id(img_trash_24));
+          if (id(waste_next).has_state()) {
+            it.print(W / 2, content_mid_y - 3, id(font_14), TextAlign::BASELINE_CENTER, "Nächste Mülltonne:");
+            it.print(W / 2, content_mid_y + 23, id(font_20), TextAlign::BASELINE_CENTER, id(waste_next).state.c_str());
+          } else {
+            it.print(W / 2, content_mid_y, id(font_20), TextAlign::CENTER, "--");
+          }
+
+      - id: page6
+        lambda: |-
+          int W = it.get_width();
+          int H = it.get_height();
+          int PAD = 6;
+          int STATUS_H = 20;
+          int CARD_H = (H - STATUS_H - 3 * PAD) / 2;
+          int CARD_W = (W - 3 * PAD) / 2;
+
+          auto draw_status_bar = [&](const char* title, int page_num) {
+            it.print(PAD + 20, STATUS_H / 2, id(font_12), TextAlign::CENTER_LEFT, title);
+            auto now = id(homeassistant_time).now();
+            if (now.is_valid())
+              it.strftime(W - PAD - 20, STATUS_H / 2, id(font_12), TextAlign::CENTER_RIGHT, "%H:%M", now);
+            int cx = W - PAD - 8, cy = STATUS_H / 2;
+            it.circle(cx, cy, 8);
+            char pg_str[2];
+            snprintf(pg_str, sizeof(pg_str), "%d", page_num);
+            it.print(cx, cy, id(font_12), TextAlign::CENTER, pg_str);
+            it.line(0, STATUS_H, W, STATUS_H);
+          };
+
+          auto draw_card = [&](int x, int y, const char* label, const char* value, const char* unit, int x_offset = 0) {
+            int mid = x + CARD_W / 2 + x_offset;
+            int val_base = y + CARD_H - 20;
+            it.rectangle(x, y, CARD_W, CARD_H);
+            it.print(x + PAD, y + PAD + 10, id(font_14), TextAlign::BASELINE_LEFT, label);
+            if (unit[0] != '\0') {
+              it.print(mid, val_base, id(font_20), TextAlign::BASELINE_RIGHT, value);
+              it.print(mid + 3, val_base, id(font_12), TextAlign::BASELINE_LEFT, unit);
+            } else {
+              it.print(mid, val_base, id(font_20), TextAlign::BASELINE_CENTER, value);
+            }
+          };
+
+          int COL1 = PAD;
+          int COL2 = PAD + CARD_W + PAD;
+          int ROW1 = STATUS_H + PAD;
+          int ROW2 = ROW1 + CARD_H + PAD;
+
+          draw_status_bar("www.markus-haack.de", 7);
+          it.image(PAD, 2, id(img_web));
+
+          char buf[12];
+          snprintf(buf, sizeof(buf), "%d", id(pirsch_visitors_today));
+          draw_card(COL1, ROW1, "Besucher", buf, "");
+          it.image(COL1 + CARD_W - PAD - 18, ROW1 + PAD, id(img_calendar_today));
+
+          snprintf(buf, sizeof(buf), "%d", id(pirsch_visitors));
+          draw_card(COL2, ROW1, "Besucher", buf, "");
+          it.image(COL2 + CARD_W - PAD - 18, ROW1 + PAD, id(img_account));
+
+          snprintf(buf, sizeof(buf), "%d", id(pirsch_views_today));
+          draw_card(COL1, ROW2, "Aufrufe heute", buf, "");
+          it.image(COL1 + CARD_W - PAD - 18, ROW2 + PAD, id(img_account_eye));
+
+          snprintf(buf, sizeof(buf), "%d", id(pirsch_views));
+          draw_card(COL2, ROW2, "Aufrufe ges.", buf, "");
+          it.image(COL2 + CARD_W - PAD - 18, ROW2 + PAD, id(img_account_eye));
+
+      - id: page7
+        lambda: |-
+          int W = it.get_width();
+          int H = it.get_height();
+          int PAD = 6;
+          int STATUS_H = 20;
+          int CARD_H = (H - STATUS_H - 3 * PAD) / 2;
+          int CARD_W = (W - 3 * PAD) / 2;
+
+          auto draw_status_bar = [&](const char* title, int page_num) {
+            it.print(PAD + 20, STATUS_H / 2, id(font_12), TextAlign::CENTER_LEFT, title);
+            auto now = id(homeassistant_time).now();
+            if (now.is_valid())
+              it.strftime(W - PAD - 20, STATUS_H / 2, id(font_12), TextAlign::CENTER_RIGHT, "%H:%M", now);
+            int cx = W - PAD - 8, cy = STATUS_H / 2;
+            it.circle(cx, cy, 8);
+            char pg_str[2];
+            snprintf(pg_str, sizeof(pg_str), "%d", page_num);
+            it.print(cx, cy, id(font_12), TextAlign::CENTER, pg_str);
+            it.line(0, STATUS_H, W, STATUS_H);
+          };
+
+          auto draw_card = [&](int x, int y, const char* label, const char* value, const char* unit, int x_offset = 0) {
+            int mid = x + CARD_W / 2 + x_offset;
+            int val_base = y + CARD_H - 20;
+            it.rectangle(x, y, CARD_W, CARD_H);
+            it.print(x + PAD, y + PAD + 10, id(font_14), TextAlign::BASELINE_LEFT, label);
+            if (unit[0] != '\0') {
+              it.print(mid, val_base, id(font_20), TextAlign::BASELINE_RIGHT, value);
+              it.print(mid + 3, val_base, id(font_12), TextAlign::BASELINE_LEFT, unit);
+            } else {
+              it.print(mid, val_base, id(font_20), TextAlign::BASELINE_CENTER, value);
+            }
+          };
+
+          int COL1 = PAD;
+          int COL2 = PAD + CARD_W + PAD;
+          int ROW1 = STATUS_H + PAD;
+          int ROW2 = ROW1 + CARD_H + PAD;
+
+          draw_status_bar("Claude", 8);
+          it.image(PAD, 2, id(img_robot));
+
+          char buf[12];
+          if (id(claude_session_usage).has_state()) snprintf(buf, sizeof(buf), "%.0f", id(claude_session_usage).state);
+          else snprintf(buf, sizeof(buf), "--");
+          draw_card(COL1, ROW1, "Session", buf, "%");
+          it.image(COL1 + CARD_W - PAD - 18, ROW1 + PAD, id(img_timer_sand));
+
+          if (id(claude_week_usage).has_state()) snprintf(buf, sizeof(buf), "%.0f", id(claude_week_usage).state);
+          else snprintf(buf, sizeof(buf), "--");
+          draw_card(COL2, ROW1, "Woche", buf, "%");
+          it.image(COL2 + CARD_W - PAD - 18, ROW1 + PAD, id(img_calendar_week));
+
+          // Parse ISO 8601 UTC datetime, return total minutes remaining
+          auto mins_until = [&](const std::string& s) -> int {
+            int yr, mo, dy, hr, mn, sc;
+            if (sscanf(s.c_str(), "%4d-%2d-%2dT%2d:%2d:%2d", &yr, &mo, &dy, &hr, &mn, &sc) != 6) return -1;
+            const int md[] = {31,28,31,30,31,30,31,31,30,31,30,31};
+            bool leap = (yr%4==0 && (yr%100!=0 || yr%400==0));
+            long long days = 0;
+            for (int y = 1970; y < yr; y++) days += (y%4==0 && (y%100!=0 || y%400==0)) ? 366 : 365;
+            for (int m = 0; m < mo-1; m++) { days += md[m]; if (m==1 && leap) days++; }
+            days += dy - 1;
+            long long reset_ts = days * 86400LL + hr*3600 + mn*60 + sc;
+            long long now_ts = (long long)id(homeassistant_time).now().timestamp;
+            long long diff = reset_ts - now_ts;
+            return diff > 0 ? (int)(diff / 60) : 0;
+          };
+
+          {
+            int total_mins = id(claude_session_reset_time).has_state() ? mins_until(id(claude_session_reset_time).state) : -1;
+            if (total_mins >= 0) snprintf(buf, sizeof(buf), "%dh %02dm", total_mins / 60, total_mins % 60);
+            else snprintf(buf, sizeof(buf), "--");
+            draw_card(COL1, ROW2, "Session Reset", buf, "");
+            it.image(COL1 + CARD_W - PAD - 18, ROW2 + PAD, id(img_timer_refresh));
+          }
+
+          {
+            int total_mins = id(claude_weekly_reset_time).has_state() ? mins_until(id(claude_weekly_reset_time).state) : -1;
+            if (total_mins >= 0) snprintf(buf, sizeof(buf), "%dh %02dm", total_mins / 60, total_mins % 60);
+            else snprintf(buf, sizeof(buf), "--");
+            draw_card(COL2, ROW2, "Wochen Reset", buf, "");
+            it.image(COL2 + CARD_W - PAD - 18, ROW2 + PAD, id(img_timer_refresh));
+          }
+
+      - id: page8
+        lambda: |-
+          int W = it.get_width();
+          int H = it.get_height();
+          int PAD = 6;
+          int STATUS_H = 20;
+          int CARD_H = (H - STATUS_H - 3 * PAD) / 2;
+          int CARD_W = (W - 3 * PAD) / 2;
+
+          auto draw_status_bar = [&](const char* title, int page_num) {
+            it.print(PAD + 20, STATUS_H / 2, id(font_12), TextAlign::CENTER_LEFT, title);
+            auto now = id(homeassistant_time).now();
+            if (now.is_valid())
+              it.strftime(W - PAD - 20, STATUS_H / 2, id(font_12), TextAlign::CENTER_RIGHT, "%H:%M", now);
+            int cx = W - PAD - 8, cy = STATUS_H / 2;
+            it.circle(cx, cy, 8);
+            char pg_str[2];
+            snprintf(pg_str, sizeof(pg_str), "%d", page_num);
+            it.print(cx, cy, id(font_12), TextAlign::CENTER, pg_str);
+            it.line(0, STATUS_H, W, STATUS_H);
+          };
+
+          auto draw_card = [&](int x, int y, const char* label, const char* value, const char* unit, int x_offset = 0) {
+            int mid = x + CARD_W / 2 + x_offset;
+            int val_base = y + CARD_H - 20;
+            it.rectangle(x, y, CARD_W, CARD_H);
+            it.print(x + PAD, y + PAD + 10, id(font_14), TextAlign::BASELINE_LEFT, label);
+            if (unit[0] != '\0') {
+              it.print(mid, val_base, id(font_20), TextAlign::BASELINE_RIGHT, value);
+              it.print(mid + 3, val_base, id(font_12), TextAlign::BASELINE_LEFT, unit);
+            } else {
+              it.print(mid, val_base, id(font_20), TextAlign::BASELINE_CENTER, value);
+            }
+          };
+
+          int COL1 = PAD;
+          int COL2 = PAD + CARD_W + PAD;
+          int ROW1 = STATUS_H + PAD;
+          int ROW2 = ROW1 + CARD_H + PAD;
+
+          draw_status_bar("System", 9);
+          it.image(PAD, 2, id(img_cog));
+
+          // WiFi card — image + dBm, drawn manually
+          {
+            it.rectangle(COL1, ROW1, CARD_W, CARD_H);
+            it.print(COL1 + PAD, ROW1 + PAD + 10, id(font_14), TextAlign::BASELINE_LEFT, "WiFi");
+            float rssi = id(wifi_rssi).state;
+            auto wifi_img = (isnan(rssi) || rssi < -85) ? id(img_wifi_0)
+                            : (rssi < -70)              ? id(img_wifi_1)
+                            : (rssi < -60)              ? id(img_wifi_2)
+                            :                             id(img_wifi_4);
+            it.image(COL1 + (CARD_W - 24) / 2, ROW1 + 20, wifi_img);
+            char rssi_str[10];
+            snprintf(rssi_str, sizeof(rssi_str), isnan(rssi) ? "--" : "%.0f dBm", rssi);
+            it.print(COL1 + CARD_W / 2, ROW1 + CARD_H - PAD, id(font_12), TextAlign::BASELINE_CENTER, rssi_str);
+          }
+
+          // IP card
+          {
+            it.rectangle(COL2, ROW1, CARD_W, CARD_H);
+            it.print(COL2 + PAD, ROW1 + PAD + 10, id(font_14), TextAlign::BASELINE_LEFT, "IP");
+            it.image(COL2 + CARD_W - PAD - 18, ROW1 + PAD, id(img_ip_outline));
+            it.print(COL2 + CARD_W / 2, ROW1 + CARD_H - 20, id(font_14), TextAlign::BASELINE_CENTER, id(wifi_ip).state.c_str());
+          }
+
+          // Uptime card
+          {
+            it.rectangle(COL1, ROW2, CARD_W, CARD_H);
+            it.print(COL1 + PAD, ROW2 + PAD + 10, id(font_14), TextAlign::BASELINE_LEFT, "Uptime");
+            it.image(COL1 + CARD_W - PAD - 18, ROW2 + PAD, id(img_history));
+            char uptime_buf[12];
+            if (id(uptime_s).has_state()) {
+              int total_s = (int)id(uptime_s).state;
+              int days = total_s / 86400;
+              int hours = (total_s % 86400) / 3600;
+              int mins = (total_s % 3600) / 60;
+              if (days > 0) snprintf(uptime_buf, sizeof(uptime_buf), "%dd %dh", days, hours);
+              else if (hours > 0) snprintf(uptime_buf, sizeof(uptime_buf), "%dh %dm", hours, mins);
+              else snprintf(uptime_buf, sizeof(uptime_buf), "%dm", mins);
+            } else {
+              snprintf(uptime_buf, sizeof(uptime_buf), "--");
+            }
+            it.print(COL1 + CARD_W / 2, ROW2 + CARD_H - 20, id(font_20), TextAlign::BASELINE_CENTER, uptime_buf);
+          }
+
+          // Current time card
+          {
+            it.rectangle(COL2, ROW2, CARD_W, CARD_H);
+            it.print(COL2 + PAD, ROW2 + PAD + 10, id(font_14), TextAlign::BASELINE_LEFT, "Zeit");
+            it.image(COL2 + CARD_W - PAD - 18, ROW2 + PAD, id(img_clock));
+            auto now = id(homeassistant_time).now();
+            if (now.is_valid())
+              it.strftime(COL2 + CARD_W / 2, ROW2 + CARD_H - 20, id(font_20), TextAlign::BASELINE_CENTER, "%H:%M", now);
+          }

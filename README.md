@@ -1,10 +1,6 @@
-# ESPHome Configs
+# zettelbox-2
 
-Personal [ESPHome](https://esphome.io) configurations for home automation devices integrated with Home Assistant.
-
-## Devices
-
-### zettelbox-2
+A DIY e-ink notepad box: a bigger Waveshare 2.7" display, a CNC-cut plywood case, and more Home Assistant data on the desk.
 
 ESP32 with a [Waveshare 2.70" e-ink display](https://www.waveshare.com/2.7inch-e-paper-hat.htm), cycling through 9 pages every 30 seconds:
 
@@ -16,7 +12,7 @@ ESP32 with a [Waveshare 2.70" e-ink display](https://www.waveshare.com/2.7inch-e
 | 4 | Climate — indoor/outdoor temp, humidity, particulates |
 | 5 | Car — Polestar 4 odometer, charge level, range, charging |
 | 6 | Waste — next bin collection |
-| 7 | Website — [markus-haack.de](https://markus-haack.de) visitor & page view stats via Pirsch |
+| 7 | Website — [markus-haack.com](https://markus-haack.com) visitor & page view stats via Pirsch |
 | 8 | Claude — session & weekly usage, reset timers |
 | 9 | System — WiFi signal, IP, uptime, time |
 
